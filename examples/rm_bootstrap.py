@@ -20,7 +20,7 @@ from lmflow.args import (
     DatasetArguments,
     AutoArguments,
 )
-k = 3 #TODO: remove hard-coding
+k = 1 #TODO: remove hard-coding
 
 ## Prepare training_args
 pipeline_name = "finetuner"
@@ -132,31 +132,34 @@ class RMTrainer(Trainer):
 data_collator = DataCollatorReward(tokenizer=tokenizer)
 
 ds = build_dataset(tokenizer, data_args)
+eval_dataset = None
+
+if data_args.validation_split_percentage > 0:
+    idx_gap = int((1-data_args.validation_split_percentage/100) * len(ds))
+    train_dataset = ds.select(range(idx_gap))
+    eval_dataset = ds.select(range(idx_gap, len(ds)))
+else:
+    train_dataset = ds
+
+print("Training set: ", len(train_dataset), " Eval set: ", len(eval_dataset))
+if not eval_dataset and pipeline_args.eval_steps > 0:
+    raise valueerror("Cannot evaluate on an empty eval set")
 
 for i in range(k):
-    # Subsample from full dataset
-    idx_sub = np.random.randint(len(ds), size=len(ds))
-    ds_sub = ds.select(idx_sub)
-    # Train validation split
-    # TODO: train and eval might contain same sample -- is this an issue?
-    eval_dataset = None
-    if data_args.validation_split_percentage > 0:
-        idx_gap = int((1-data_args.validation_split_percentage/100) * len(ds))
-        train_dataset = ds_sub.select(range(idx_gap))
-        eval_dataset = ds_sub.select(range(idx_gap, len(ds)))
-    else:
-        train_dataset = ds_sub
     
-    if not eval_dataset and pipeline_args.eval_steps > 0:
-        raise valueerror("Cannot evaluate on an empty eval set")
-    print("Training set: ", len(train_dataset), " Eval set: ", len(eval_dataset))
+    # Subsample from train and eval datasets separately
+    idx_train = np.random.randint(len(train_dataset), size=len(train_dataset))
+    train_sub = train_dataset.select(idx_train)
+    idx_eval = np.random.randint(len(eval_dataset), size=len(eval_dataset))
+    eval_sub = eval_dataset.select(idx_eval)
+    
 
     trainer = RMTrainer(
         model=model_lora,
         args=pipeline_args,
-        train_dataset=train_dataset,
+        train_dataset=train_sub,
         compute_metrics=compute_metrics,
-        eval_dataset=eval_dataset,
+        eval_dataset=eval_sub,
         data_collator=data_collator,
     )
 

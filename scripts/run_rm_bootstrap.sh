@@ -14,14 +14,14 @@ model_name=finetune-gpt-neo
 model_path=output_models/${model_name}
 # model_name=gpt2
 # model_path=gpt2
-k=3
+k=1
 exp_id=rm_${model_name}_bs_${k}
 output_dir=${project_dir}/output_models/${exp_id}
 log_dir=${project_dir}/log/${exp_id}
 
 mkdir -p ${output_dir} ${log_dir}
 
-CUDA_VISIBLE_DEVICES=0,1 \
+CUDA_VISIBLE_DEVICES=2,3 \
   deepspeed ${deepspeed_args} \
     examples/rm_bootstrap.py \
       --model_name_or_path ${model_path} \
