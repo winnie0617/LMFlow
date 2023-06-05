@@ -10,24 +10,24 @@ fi
 
 project_dir=$(cd "$(dirname $0)"/..; pwd)
 dataset_path=${project_dir}/data/anthropic/harmless-base/rm/train/dataset.json
-# model_name=finetune-gpt-neo
-# model_path=output_models/${model_name}
-model_name=gpt2
-model_path=gpt2
-k=10
+model_name=finetune-gpt-neo
+model_path=output_models/${model_name}
+# model_name=gpt2
+# model_path=gpt2
+k=3
 exp_id=rm_${model_name}_bs_${k}
 output_dir=${project_dir}/output_models/${exp_id}
 log_dir=${project_dir}/log/${exp_id}
 
 mkdir -p ${output_dir} ${log_dir}
 
-CUDA_VISIBLE_DEVICES=3,4,5,6,7 \
+CUDA_VISIBLE_DEVICES=0,1 \
   deepspeed ${deepspeed_args} \
     examples/rm_bootstrap.py \
       --model_name_or_path ${model_path} \
       --dataset_path ${dataset_path} \
       --output_dir ${output_dir} --overwrite_output_dir \
-      --num_train_epochs 0.01 \
+      --num_train_epochs 1 \
       --learning_rate 3e-5 \
       --block_size 512 \
       --per_device_train_batch_size 1 \

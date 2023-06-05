@@ -20,7 +20,7 @@ from lmflow.args import (
     DatasetArguments,
     AutoArguments,
 )
-k = 10 #TODO: remove hard-coding
+k = 3 #TODO: remove hard-coding
 
 ## Prepare training_args
 pipeline_name = "finetuner"
