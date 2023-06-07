@@ -28,6 +28,7 @@ from lmflow.args import (
 
 from transformers import AdamW, get_linear_schedule_with_warmup
 from tqdm import tqdm
+import wandb
 
 k = 1 #TODO: remove hard-coding
 
@@ -122,16 +123,12 @@ class DataCollatorReward:
             data_neg.append({"input_ids": sample['rejected_input_ids'], "attention_mask": sample["rejected_attention_mask"]})
         batch_pos = self.tokenizer.pad(data_pos, padding=True, return_tensors="pt")
         batch_neg = self.tokenizer.pad(data_neg, padding=True, return_tensors="pt")
-        batch['chosen_input_ids'] = batch_pos['input_ids']
-        batch['rejected_input_ids'] = batch_neg['input_ids']
-        batch['chosen_attention_mask'] = batch_pos['attention_mask']
-        batch['rejected_attention_mask'] = batch_neg['attention_mask']
+        batch['chosen_input_ids'] = batch_pos['input_ids'].to(device)
+        batch['rejected_input_ids'] = batch_neg['input_ids'].to(device)
+        batch['chosen_attention_mask'] = batch_pos['attention_mask'].to(device)
+        batch['rejected_attention_mask'] = batch_neg['attention_mask'].to(device)
         batch['return_loss'] = True
         return batch
-
-
-# class RMTrainer(Trainer):
-
 
 data_collator = DataCollatorReward(tokenizer=tokenizer)
 
@@ -162,20 +159,33 @@ def compute_loss(pretrained, value_head, inputs, return_outputs=False):
 
 def train(pretrained, train_data, eval_data):
     
+
+
     config = PretrainedConfig.from_pretrained("output_models/finetune-gpt-neo/config.json") # TODO: remove hard code
-    value_head = SequenceSummary(config)
+    value_head = SequenceSummary(config).to(device)
     # print(value_head)
 
-    train_dataloader = DataLoader(train_data, batch_size=16, collate_fn=data_collator)
-    eval_dataloader = DataLoader(eval_data, batch_size=16, collate_fn=data_collator)
+    train_dataloader = DataLoader(train_data, batch_size=pipeline_args.per_device_train_batch_size, collate_fn=data_collator)
+    eval_dataloader = DataLoader(eval_data, batch_size=pipeline_args.per_device_eval_batch_size, collate_fn=data_collator)
 
-    num_epochs = 1
-    num_training_steps = 3 * len(train_dataloader)
-    optimizer = AdamW(list(value_head.parameters()), lr=5e-5, weight_decay=0.01)
+    num_epochs = int(pipeline_args.num_train_epochs)
+    num_training_steps = num_epochs * len(train_dataloader)
+    optimizer = AdamW(list(value_head.parameters()), lr=pipeline_args.learning_rate, weight_decay=pipeline_args.weight_decay)
     lr_scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
 
     best_val_loss = float("inf")
-    # progress_bar = tqdm(range(num_training_steps))
+
+    # Logging
+    run = wandb.init(
+        # Set the project where this run will be logged
+        project="rm_head",
+        # Track hyperparameters and run metadata
+        config={
+            "learning_rate": 0.01,
+            "epochs": num_epochs,
+        })
+    # wandb.init(settings=wandb.Settings(start_method="fork"))
+    
 
     with tqdm(range(num_training_steps)) as progress_bar:
         for epoch in range(num_epochs):
@@ -189,29 +199,35 @@ def train(pretrained, train_data, eval_data):
                 optimizer.step()
                 lr_scheduler.step()
                 progress_bar.update(1)
-            
-            # validation
-            value_head.eval()
-            for batch_i, batch in enumerate(eval_dataloader):
-                with torch.no_grad():
-                    loss += compute_loss(pretrained, value_head, batch, return_outputs=False)
-            
-            avg_val_loss = loss / len(eval_dataloader)
-            print(f"Validation loss: {avg_val_loss}")
-            if avg_val_loss < best_val_loss:
-                print("Saving checkpoint!")
-                best_val_loss = avg_val_loss
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': value_head.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'val_loss': best_val_loss,
-                    },
-                    f"checkpoints/epoch_{epoch}.pt"
-                )  
+                wandb.log({"train/loss": loss,})
+                # TODO: gradient accumulation
+
+                # validation
+                if (batch_i+1) % pipeline_args.eval_steps == 0:
+                    value_head.eval()
+                    for batch_i, batch in enumerate(eval_dataloader):
+                        with torch.no_grad():
+                            loss += compute_loss(pretrained, value_head, batch, return_outputs=False)
+                    avg_val_loss = loss / len(eval_dataloader)
+                    wandb.log({"val/loss": avg_val_loss,})
+                    print(f"Validation loss: {avg_val_loss}")
+                    if avg_val_loss < best_val_loss:
+                        print("Saving checkpoint!")
+                        best_val_loss = avg_val_loss
+                        torch.save({
+                            'epoch': epoch,
+                            'model_state_dict': value_head.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'val_loss': best_val_loss,
+                            },
+                            f"checkpoints/epoch_{epoch}.pt"
+                        )  
+                    value_head.train()
+# GPU
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Instantiate model without head to prevent multiple copies
-pretrained = AutoModel.from_pretrained("output_models/finetune-gpt-neo")
+pretrained = AutoModel.from_pretrained("output_models/finetune-gpt-neo").to(device)
 # # Freeze all layers
 # for param in pretrained.parameters():
 #     param.requires_grad = False

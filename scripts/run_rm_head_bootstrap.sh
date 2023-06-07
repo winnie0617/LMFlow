@@ -21,7 +21,7 @@ log_dir=${project_dir}/log/${exp_id}
 
 mkdir -p ${output_dir} ${log_dir}
 
-CUDA_VISIBLE_DEVICES=2,3 \
+CUDA_VISIBLE_DEVICES=2 \
   deepspeed ${deepspeed_args} \
     examples/rm_head_bootstrap.py \
       --model_name_or_path ${model_path} \
@@ -30,8 +30,8 @@ CUDA_VISIBLE_DEVICES=2,3 \
       --num_train_epochs 1 \
       --learning_rate 3e-5 \
       --block_size 512 \
-      --per_device_train_batch_size 2 \
-      --per_device_eval_batch_size 2 \
+      --per_device_train_batch_size 1 \
+      --per_device_eval_batch_size 1 \
       --gradient_accumulation_steps 16 \
       --deepspeed configs/ds_config_zero2.json \
       --bf16 \
