@@ -2,23 +2,18 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 import os
 import sys
-sys.path.remove(os.path.abspath(os.path.dirname(sys.argv[0])))
+# sys.path.remove(os.path.abspath(os.path.dirname(sys.argv[0])))
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from datasets import load_dataset
 # from peft import LoraConfig, TaskType, get_peft_model
-
-from transformers.modeling_utils import SequenceSummary
-
 
 from transformers import (
     AutoModel,
     AutoTokenizer,
     HfArgumentParser,
     Trainer,
-    PretrainedConfig
 )
 from lmflow.args import (
     ModelArguments,
@@ -26,11 +21,9 @@ from lmflow.args import (
     AutoArguments,
 )
 
-from transformers import AdamW, get_linear_schedule_with_warmup
-from tqdm import tqdm
-import wandb
+from value_head import ModelWithValueHead
 
-k = 1 #TODO: remove hard-coding
+k = 3 #TODO: remove hard-coding
 
 ## Prepare training_args
 pipeline_name = "finetuner"
@@ -52,11 +45,12 @@ pipeline_args.label_names = []
 #     lora_alpha=32,
 #     lora_dropout=0.1,
 # )
-# Load in model without head
-model = AutoModel.from_pretrained(model_args.model_name_or_path, num_labels=1, torch_dtype=torch.bfloat16)
+# trust_remote_code=True if you want to use chatglm
+pretrained = AutoModel.from_pretrained(model_args.model_name_or_path, torch_dtype=torch.bfloat16)
+# Freeze all layers
+for param in pretrained.parameters():
+    param.requires_grad = False
 
-# model_lora = get_peft_model(model, peft_config)
-# model_lora.print_trainable_parameters()
 
 ## Get tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
@@ -75,8 +69,8 @@ else:
     tokenizer.pad_token_id = tokenizer.eos_token_id
 
 # We also need to add a pad_token for the model. Otherwise, the reward model cannot handle a batch of inputs
-model.config.pad_token_id = tokenizer.eos_token_id
-assert model.config.pad_token_id == tokenizer.pad_token_id
+pretrained.config.pad_token_id = tokenizer.eos_token_id
+assert pretrained.config.pad_token_id == tokenizer.pad_token_id
 
 ## Get the dataset
 #TODO: change this to bootstrapping
@@ -123,12 +117,22 @@ class DataCollatorReward:
             data_neg.append({"input_ids": sample['rejected_input_ids'], "attention_mask": sample["rejected_attention_mask"]})
         batch_pos = self.tokenizer.pad(data_pos, padding=True, return_tensors="pt")
         batch_neg = self.tokenizer.pad(data_neg, padding=True, return_tensors="pt")
-        batch['chosen_input_ids'] = batch_pos['input_ids'].to(device)
-        batch['rejected_input_ids'] = batch_neg['input_ids'].to(device)
-        batch['chosen_attention_mask'] = batch_pos['attention_mask'].to(device)
-        batch['rejected_attention_mask'] = batch_neg['attention_mask'].to(device)
+        batch['chosen_input_ids'] = batch_pos['input_ids']
+        batch['rejected_input_ids'] = batch_neg['input_ids']
+        batch['chosen_attention_mask'] = batch_pos['attention_mask']
+        batch['rejected_attention_mask'] = batch_neg['attention_mask']
         batch['return_loss'] = True
         return batch
+
+
+class RMTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False):
+        chosen_rewards = model(input_ids=inputs["chosen_input_ids"], attention_mask=inputs["chosen_attention_mask"])[0]
+        rejected_rewards = model(input_ids=inputs["rejected_input_ids"], attention_mask=inputs["rejected_attention_mask"])[0]
+        loss = -nn.functional.logsigmoid(chosen_rewards - rejected_rewards).mean()
+        if return_outputs:
+            return loss, {"chosen_rewards": chosen_rewards, "rejected_rewards": rejected_rewards}
+        return loss
 
 data_collator = DataCollatorReward(tokenizer=tokenizer)
 
@@ -146,92 +150,6 @@ print("Training set: ", len(train_dataset), " Eval set: ", len(eval_dataset))
 if not eval_dataset and pipeline_args.eval_steps > 0:
     raise valueerror("Cannot evaluate on an empty eval set")
 
-
-def compute_loss(pretrained, value_head, inputs, return_outputs=False):
-    chosen_hidden = pretrained(input_ids=inputs["chosen_input_ids"], attention_mask=inputs["chosen_attention_mask"])[0]
-    rejected_hidden = pretrained(input_ids=inputs["rejected_input_ids"], attention_mask=inputs["rejected_attention_mask"])[0]
-    chosen_rewards = value_head(chosen_hidden, None).squeeze(-1)
-    rejected_rewards = value_head(rejected_hidden, None).squeeze(-1)
-    loss = -nn.functional.logsigmoid(chosen_rewards - rejected_rewards).mean()
-    if return_outputs:
-        return loss, {"chosen_rewards": chosen_rewards, "rejected_rewards": rejected_rewards}
-    return loss
-
-def train(pretrained, train_data, eval_data):
-    
-
-
-    config = PretrainedConfig.from_pretrained("output_models/finetune-gpt-neo/config.json") # TODO: remove hard code
-    value_head = SequenceSummary(config).to(device)
-    # print(value_head)
-
-    train_dataloader = DataLoader(train_data, batch_size=pipeline_args.per_device_train_batch_size, collate_fn=data_collator)
-    eval_dataloader = DataLoader(eval_data, batch_size=pipeline_args.per_device_eval_batch_size, collate_fn=data_collator)
-
-    num_epochs = int(pipeline_args.num_train_epochs)
-    num_training_steps = num_epochs * len(train_dataloader)
-    optimizer = AdamW(list(value_head.parameters()), lr=pipeline_args.learning_rate, weight_decay=pipeline_args.weight_decay)
-    lr_scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
-
-    best_val_loss = float("inf")
-
-    # Logging
-    run = wandb.init(
-        # Set the project where this run will be logged
-        project="rm_head",
-        # Track hyperparameters and run metadata
-        config={
-            "learning_rate": 0.01,
-            "epochs": num_epochs,
-        })
-    # wandb.init(settings=wandb.Settings(start_method="fork"))
-    
-
-    with tqdm(range(num_training_steps)) as progress_bar:
-        for epoch in range(num_epochs):
-            # training
-            value_head.train()
-            for batch_i, batch in enumerate(train_dataloader):
-                # batch = ([text1, text2], [0, 1])
-                optimizer.zero_grad()
-                loss = compute_loss(pretrained, value_head, batch, return_outputs=False)
-                loss.backward()
-                optimizer.step()
-                lr_scheduler.step()
-                progress_bar.update(1)
-                wandb.log({"train/loss": loss,})
-                # TODO: gradient accumulation
-
-                # validation
-                if (batch_i+1) % pipeline_args.eval_steps == 0:
-                    value_head.eval()
-                    for batch_i, batch in enumerate(eval_dataloader):
-                        with torch.no_grad():
-                            loss += compute_loss(pretrained, value_head, batch, return_outputs=False)
-                    avg_val_loss = loss / len(eval_dataloader)
-                    wandb.log({"val/loss": avg_val_loss,})
-                    print(f"Validation loss: {avg_val_loss}")
-                    if avg_val_loss < best_val_loss:
-                        print("Saving checkpoint!")
-                        best_val_loss = avg_val_loss
-                        torch.save({
-                            'epoch': epoch,
-                            'model_state_dict': value_head.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict(),
-                            'val_loss': best_val_loss,
-                            },
-                            f"checkpoints/epoch_{epoch}.pt"
-                        )  
-                    value_head.train()
-# GPU
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-# Instantiate model without head to prevent multiple copies
-pretrained = AutoModel.from_pretrained("output_models/finetune-gpt-neo").to(device)
-# # Freeze all layers
-# for param in pretrained.parameters():
-#     param.requires_grad = False
-    
 for i in range(k):
     
     # Subsample from train and eval datasets separately
@@ -239,11 +157,22 @@ for i in range(k):
     train_sub = train_dataset.select(idx_train)
     idx_eval = np.random.randint(len(eval_dataset), size=len(eval_dataset))
     eval_sub = eval_dataset.select(idx_eval)
+    
+    model = ModelWithValueHead(pretrained, "output_models/finetune-gpt-neo/config.json") # TODO: remove hard coding
 
-    train(pretrained, train_sub, eval_sub)
+    trainer = RMTrainer(
+        model=model,
+        args=pipeline_args,
+        train_dataset=train_sub,
+        compute_metrics=compute_metrics,
+        eval_dataset=eval_sub,
+        data_collator=data_collator,
+    )
+
+    trainer.train()
+
     ## Save model
-    # model_lora.save_pretrained(f"{pipeline_args.output_dir}/head_{i}")
-
-
+    # model_lora.save_pretrained(f"{pipeline_args.output_dir}/rm_{i}")
+    model.save_head(f"{pipeline_args.output_dir}/head_{i}")
 
 

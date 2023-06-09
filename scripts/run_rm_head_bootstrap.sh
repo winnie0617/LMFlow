@@ -14,14 +14,14 @@ model_name=finetune-gpt-neo
 model_path=output_models/${model_name}
 # model_name=gpt2
 # model_path=gpt2
-k=1
+k=3
 exp_id=rm_head_${model_name}_bs_${k}
 output_dir=${project_dir}/output_models/${exp_id}
 log_dir=${project_dir}/log/${exp_id}
 
 mkdir -p ${output_dir} ${log_dir}
 
-CUDA_VISIBLE_DEVICES=2 \
+CUDA_VISIBLE_DEVICES=0,1 \
   deepspeed ${deepspeed_args} \
     examples/rm_head_bootstrap.py \
       --model_name_or_path ${model_path} \
@@ -30,8 +30,8 @@ CUDA_VISIBLE_DEVICES=2 \
       --num_train_epochs 1 \
       --learning_rate 3e-5 \
       --block_size 512 \
-      --per_device_train_batch_size 1 \
-      --per_device_eval_batch_size 1 \
+      --per_device_train_batch_size 2 \
+      --per_device_eval_batch_size 2 \
       --gradient_accumulation_steps 16 \
       --deepspeed configs/ds_config_zero2.json \
       --bf16 \
@@ -42,7 +42,7 @@ CUDA_VISIBLE_DEVICES=2 \
       --ddp_timeout 72000 \
       --save_steps 999999 \
       --evaluation_strategy steps\
-      --eval_steps 100\
+      --eval_steps 100 \
       --weight_decay 0.001\
       --dataloader_num_workers 1 \
       | tee ${log_dir}/train.log \
