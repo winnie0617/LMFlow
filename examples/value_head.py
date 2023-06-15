@@ -11,7 +11,22 @@ from transformers.modeling_utils import SequenceSummary
 from transformers import AdamW, get_linear_schedule_with_warmup
 from tqdm.notebook import tqdm
 
+torch.set_default_dtype(torch.bfloat16)
 
+# Define the class for single layer NN
+class one_layer_net(nn.Module):    
+    # Constructor
+    def __init__(self, input_size, hidden_neurons, output_size):
+        super(one_layer_net, self).__init__()
+        # hidden layer 
+        self.linear_one = nn.Linear(input_size, hidden_neurons)
+        self.linear_two = nn.Linear(hidden_neurons, output_size) 
+
+    # prediction function
+    def forward(self, x):
+        self.act = torch.tanh(self.linear_one(x))
+        y_pred = self.linear_two(self.act)
+        return y_pred
 
 class ModelWithValueHead(nn.Module):
     def __init__(self, pretrained, config_file):
@@ -21,8 +36,8 @@ class ModelWithValueHead(nn.Module):
         self.transformer = pretrained
         config = PretrainedConfig.from_pretrained(config_file)
         config.num_labels = 1
-        self.head = SequenceSummary(config)
-        self.config = pretrained.config
+        # self.head = SequenceSummary(config)
+        self.head = one_layer_net(2560, 256, 1)
         # self.init_weights()
         
     def forward(
@@ -51,7 +66,14 @@ class ModelWithValueHead(nn.Module):
             # output_hidden_states=output_hidden_states,
         )
         hidden_states = transformer_outputs[0]
-        output = self.head(hidden_states, mc_token_ids).squeeze(-1)
+        cls_index = torch.full_like(
+            hidden_states[..., :1, :],
+            hidden_states.shape[-2] - 1,
+            dtype=torch.long,
+        )
+        # cls at last index
+        cls = hidden_states.gather(-2, cls_index).squeeze(-2)
+        output = self.head(cls)
         return output
 
     def save_head(self, path):

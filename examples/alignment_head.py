@@ -77,19 +77,26 @@ if gpt:
     model_name = "/home/winnie/LMFlow/output_models/finetune-gpt-neo"
 else:
     model_name = "/home/winnie/trl/examples/sentiment/scripts/my_models/finetune-with-lora-llama-merged"
-rm_name = "/home/winnie/LMFlow/output_models/rm_head_finetune-gpt-neo_bs_3"
-k = 3
+rm_name = "/home/winnie/LMFlow/output_models/rm_head_1layer_finetune-gpt-neo_bs_10"
+k = 7
+
 
 config = PPOConfig(
     model_name=model_name,
     learning_rate=1e-5,
     # init_kl_coef=0.05,
     log_with=script_args.log_with,
-    batch_size=32,
+    batch_size=1,
     mini_batch_size=1,
-    gradient_accumulation_steps=1,
+    gradient_accumulation_steps=32,
     optimize_cuda_cache=True,
 )
+
+# Configure tokenizer
+tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+if gpt:
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token_id = tokenizer.eos_token_id
 
 # We then define the arguments to pass to the sentiment analysis pipeline.
 # We set `return_all_scores` to True to get the sentiment score for each token.
@@ -178,7 +185,6 @@ model = AutoModelForCausalLMWithValueHead.from_pretrained(
     # max_memory={0: "800MB", 1: "800MB"},
     peft_config=lora_config,
 )
-tokenizer = AutoTokenizer.from_pretrained(config.model_name)
 
 print_trainable_parameters(model)
 
@@ -206,14 +212,20 @@ if ppo_trainer.accelerator.num_processes == 1:
     device = 0 if torch.cuda.is_available() else "cpu"  # to avoid a `pipeline` bug
 
 # Use the same pretrained model object to
-pretrained = AutoModel.from_pretrained("/home/winnie/LMFlow/output_models/finetune-gpt-neo", torch_dtype=torch.bfloat16)
+pretrained = AutoModel.from_pretrained("/home/winnie/LMFlow/output_models/finetune-gpt-neo", torch_dtype=torch.bfloat16).to(device)
 # head_config = PretrainedConfig.from_pretrained("output_models/finetune-gpt-neo/config.json")
 
+# We also need to add a pad_token for the model. Otherwise, the reward model cannot handle a batch of inputs
+pretrained.config.pad_token_id = tokenizer.eos_token_id
+assert pretrained.config.pad_token_id == tokenizer.pad_token_id
 
 models = []
 for i in range(k):
     model = ModelWithValueHead(pretrained, "output_models/finetune-gpt-neo/config.json")
-    model.head.load_state_dict(torch.load(f"output_models/rm_head_finetune-gpt-neo_bs_3/head_{i}"))
+    # loaded_state = torch.load(f"{rm_name}/head_{i}")
+    loaded_state = torch.load(f"{rm_name}/head_{i}", map_location="cuda:0")
+    model.head.load_state_dict(loaded_state)
+    model.to(device)
     models.append(model)
     # print(model)
 
@@ -251,12 +263,14 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
     texts = [q + r for q, r in zip(batch["query"], batch["response"])]
     # Get hidden layer from pretrained
     # 
+
     rewards = torch.zeros(k, config.batch_size)
     for i, model in enumerate(models):
-        model_outputs = model(tokenizer.encode(texts))
-        rewards[i,:] = torch.tensor([output[0]["score"] for output in model_outputs])
+        model_inputs = tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
+        model_inputs.to(device)
+        model_outputs = model(input_ids=model_inputs["input_ids"], attention_mask=model_inputs["attention_mask"])
+        rewards[i,:] = torch.tensor([output for output in model_outputs])
 
-    print(rewards)
     rewards_mean = rewards.mean(axis=0)
     rewards_std = rewards.std(axis=0)
 
@@ -273,7 +287,7 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
         print(r)
         print(s)
     
-    penalized_reward = [torch.tensor(m) for m in penalized_reward] # reward has to be a list of tensor
+    penalized_reward = [torch.tensor(m, dtype=torch.float16) for m in penalized_reward] # reward has to be a list of tensor
 
     # Run PPO step
     # model.gradient_checkpointing_enable()
@@ -282,5 +296,4 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
     stats = ppo_trainer.step(query_tensors, response_tensors, penalized_reward)
     ppo_trainer.log_stats(stats, batch, penalized_reward, rewards_std) # TODO: update logger
 
-
-model.push_to_hub(f"{script_args.model_name}-ppo-sentiment")
+# model.push_to_hub(f"{script_args.model_name}-ppo-sentiment")
