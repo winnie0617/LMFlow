@@ -24,6 +24,9 @@ from transformers import AutoTokenizer, HfArgumentParser, pipeline
 from trl import AutoModelForCausalLMWithValueHead, PPOConfig, PPOTrainer, set_seed
 from trl.core import LengthSampler
 
+from value_head import ModelWithValueHead
+from transformers import AutoModel, PretrainedConfig
+
 
 ########################################################################
 # This is a fully working simple example to use trl with accelerate.
@@ -199,9 +202,6 @@ ppo_trainer = PPOTrainer(
     config, model, ref_model=None, tokenizer=tokenizer, dataset=dataset, data_collator=collator, optimizer=optimizer
 )
 
-from value_head import ModelWithValueHead
-from transformers import AutoModel, PretrainedConfig
-from transformers.modeling_utils import SequenceSummary
 
 
 # We then build the sentiment analysis pipeline, passing the model name and the

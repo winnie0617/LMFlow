@@ -30,7 +30,7 @@ from transformers import AdamW, get_linear_schedule_with_warmup
 from tqdm import tqdm
 import wandb
 
-k = 1 #TODO: remove hard-coding
+k = 3 #TODO: remove hard-coding
 
 ## Prepare training_args
 pipeline_name = "finetuner"

@@ -4,7 +4,7 @@ from typing import Optional
 import peft
 import torch
 from peft import PeftConfig, PeftModel
-from peft.utils import _get_submodules
+# from peft.utils import _get_submodules
 from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, HfArgumentParser
 
 
@@ -33,7 +33,7 @@ assert script_args.base_model_name is not None, "please provide the output name 
 
 peft_config = PeftConfig.from_pretrained(script_args.adapter_model_name)
 # Set num_labels to be 1 to match rm
-model = AutoModelForSequenceClassification.from_pretrained(script_args.base_model_name, return_dict=True, num_labels=1, torch_dtype=torch.bfloat16)
+model = AutoModelForSequenceClassification.from_pretrained(script_args.base_model_name, num_labels=1, torch_dtype=torch.bfloat16)
 tokenizer = AutoTokenizer.from_pretrained(script_args.base_model_name)
 config = AutoConfig.from_pretrained(script_args.base_model_name)
 architecture = config.architectures[0]
@@ -63,5 +63,6 @@ for key in key_list:
 model = model.base_model.model
 
 model.save_pretrained(f"{script_args.output_name}")
+print(model)
 tokenizer.save_pretrained(f"{script_args.output_name}")
-model.push_to_hub(f"{script_args.output_name}", use_temp_dir=False)
+# model.push_to_hub(f"{script_args.output_name}", use_temp_dir=False)

@@ -20,52 +20,6 @@ from lmflow.args import (
     DatasetArguments,
     AutoArguments,
 )
-k = 1 #TODO: remove hard-coding
-
-## Prepare training_args
-pipeline_name = "finetuner"
-PipelineArguments = AutoArguments.get_pipeline_args_class(pipeline_name)
-parser = HfArgumentParser((ModelArguments, DatasetArguments, PipelineArguments))
-
-if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-    model_args, data_args, pipeline_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
-else:
-    model_args, data_args, pipeline_args = parser.parse_args_into_dataclasses()
-
-pipeline_args.remove_unused_columns = False 
-pipeline_args.label_names = []
-
-## Get model, by default we use lora to accelerate training
-peft_config = LoraConfig(
-    task_type=TaskType.SEQ_CLS,
-    r=16,
-    lora_alpha=32,
-    lora_dropout=0.1,
-)
-# trust_remote_code=True if you want to use chatglm
-model = AutoModelForSequenceClassification.from_pretrained(model_args.model_name_or_path, num_labels=1, torch_dtype=torch.bfloat16)
-model_lora = get_peft_model(model, peft_config)
-model_lora.print_trainable_parameters()
-
-## Get tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
-
-if "llama" in model_args.model_name_or_path:
-    tokenizer.add_special_tokens(
-        {
-            "eos_token": "[PAD]",
-            "bos_token": "</s>",
-            "unk_token": "</s>",
-            "pad_token": "</s>",
-        }
-    )
-else:
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.pad_token_id = tokenizer.eos_token_id
-
-# We also need to add a pad_token for the model. Otherwise, the reward model cannot handle a batch of inputs
-model_lora.config.pad_token_id = tokenizer.eos_token_id
-assert model_lora.config.pad_token_id == tokenizer.pad_token_id
 
 ## Get the dataset
 #TODO: change this to bootstrapping
@@ -129,6 +83,53 @@ class RMTrainer(Trainer):
             return loss, {"chosen_rewards": chosen_rewards, "rejected_rewards": rejected_rewards}
         return loss
 
+@dataclass
+class BootstrapArguments:
+    """
+    The name of the Casual LM model we wish to fine with PPO
+    """
+    model_number: Optional[int] = field(default=None, metadata={"help": "the model number"})
+
+# k = 5 #TODO: remove hard-coding
+
+## Prepare training_args
+pipeline_name = "finetuner"
+PipelineArguments = AutoArguments.get_pipeline_args_class(pipeline_name)
+parser = HfArgumentParser((ModelArguments, DatasetArguments, PipelineArguments, BootstrapArguments))
+
+if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
+    model_args, data_args, pipeline_args, bootstrap_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+else:
+    model_args, data_args, pipeline_args, bootstrap_args = parser.parse_args_into_dataclasses()
+
+pipeline_args.remove_unused_columns = False 
+pipeline_args.label_names = []
+
+## Get model, by default we use lora to accelerate training
+peft_config = LoraConfig(
+    task_type=TaskType.SEQ_CLS,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.1,
+)
+# trust_remote_code=True if you want to use chatglm
+
+## Get tokenizer
+tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
+
+if "llama" in model_args.model_name_or_path:
+    tokenizer.add_special_tokens(
+        {
+            "eos_token": "[PAD]",
+            "bos_token": "</s>",
+            "unk_token": "</s>",
+            "pad_token": "</s>",
+        }
+    )
+else:
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token_id = tokenizer.eos_token_id
+
 data_collator = DataCollatorReward(tokenizer=tokenizer)
 
 ds = build_dataset(tokenizer, data_args)
@@ -145,26 +146,49 @@ print("Training set: ", len(train_dataset), " Eval set: ", len(eval_dataset))
 if not eval_dataset and pipeline_args.eval_steps > 0:
     raise valueerror("Cannot evaluate on an empty eval set")
 
-for i in range(k):
+i = bootstrap_args.model_number
+np.random.seed(i)
+# idx_train_mat = np.random.randint(len(train_dataset), size=(k, len(train_dataset)))
+# idx_eval_mat = np.random.randint(len(eval_dataset), size=(k, len(eval_dataset)))
+
+# for i in range(k):
+
+model = AutoModelForSequenceClassification.from_pretrained(model_args.model_name_or_path, num_labels=1, torch_dtype=torch.bfloat16)
+# We also need to add a pad_token for the model. Otherwise, the reward model cannot handle a batch of inputs
+model_lora = get_peft_model(model, peft_config)
+model_lora.print_trainable_parameters()
+model_lora.config.pad_token_id = tokenizer.eos_token_id
+
+
+# Subsample from train and eval datasets separately
+# idx_train = idx_train_mat[i,:]
+idx_train = np.random.randint(len(train_dataset), size=len(train_dataset)//5)
+print("Subset size:", len(idx_train))
+print(idx_train[:10])
+train_sub = train_dataset.select(idx_train)
+# idx_eval = idx_eval_mat[i,:]
+
+# idx_eval = np.random.randint(len(eval_dataset), size=len(eval_dataset))
+# eval_sub = eval_dataset.select(idx_eval)
+eval_sub = eval_dataset
+
+
+trainer = RMTrainer(
+    model=model_lora,
+    args=pipeline_args,
+    train_dataset=train_sub,
+    compute_metrics=compute_metrics,
+    eval_dataset=eval_sub,
+    data_collator=data_collator,
+)
+
+trainer.train()
+
+## Save model
+# eval_res = trainer.evaluate(eval_dataset=ds)
+# print(eval_res)
+# trainer.save_model(f"{pipeline_args.output_dir}/rm_{i}")
+model_merged = model_lora.merge_and_unload()
+model_merged.save_pretrained(f"{pipeline_args.output_dir}/rm_{i}")
+# trainer.model.save_pretrained(f"{pipeline_args.output_dir}/rm_{i}")
     
-    # Subsample from train and eval datasets separately
-    idx_train = np.random.randint(len(train_dataset), size=len(train_dataset))
-    train_sub = train_dataset.select(idx_train)
-    idx_eval = np.random.randint(len(eval_dataset), size=len(eval_dataset))
-    eval_sub = eval_dataset.select(idx_eval)
-    
-
-    trainer = RMTrainer(
-        model=model_lora,
-        args=pipeline_args,
-        train_dataset=train_sub,
-        compute_metrics=compute_metrics,
-        eval_dataset=eval_sub,
-        data_collator=data_collator,
-    )
-
-    trainer.train()
-
-    ## Save model
-    model_lora.save_pretrained(f"{pipeline_args.output_dir}/rm_{i}")
-

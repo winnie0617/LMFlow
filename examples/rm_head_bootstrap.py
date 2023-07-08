@@ -23,7 +23,7 @@ from lmflow.args import (
 
 from value_head import ModelWithValueHead
 
-k = 3 #TODO: remove hard-coding
+k = 5 #TODO: remove hard-coding
 
 ## Prepare training_args
 pipeline_name = "finetuner"
@@ -150,16 +150,21 @@ print("Training set: ", len(train_dataset), " Eval set: ", len(eval_dataset))
 if not eval_dataset and pipeline_args.eval_steps > 0:
     raise valueerror("Cannot evaluate on an empty eval set")
 
+idx_train_mat = np.random.randint(len(train_dataset), size=(k, len(train_dataset)))
+idx_eval_mat = np.random.randint(len(eval_dataset), size=(k, len(eval_dataset)))
+
 for i in range(k):
     
     # Subsample from train and eval datasets separately
-    idx_train = np.random.randint(len(train_dataset), size=len(train_dataset))
+    idx_train = idx_train_mat[i,:]
+    # idx_train = np.random.randint(len(train_dataset), size=len(train_dataset))
     train_sub = train_dataset.select(idx_train)
-    idx_eval = np.random.randint(len(eval_dataset), size=len(eval_dataset))
+    idx_eval = idx_eval_mat[i,:]
+    # idx_eval = np.random.randint(len(eval_dataset), size=len(eval_dataset))
     eval_sub = eval_dataset.select(idx_eval)
     
     model = ModelWithValueHead(pretrained, "output_models/finetune-gpt-neo/config.json") # TODO: remove hard coding
-
+    print(model)
     trainer = RMTrainer(
         model=model,
         args=pipeline_args,

@@ -13,7 +13,7 @@ from tqdm.notebook import tqdm
 
 torch.set_default_dtype(torch.bfloat16)
 
-# Define the class for single layer NN
+# Define the class for single layer NN  
 class one_layer_net(nn.Module):    
     # Constructor
     def __init__(self, input_size, hidden_neurons, output_size):
