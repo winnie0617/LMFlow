@@ -10,7 +10,7 @@ import numpy as np
 
 import csv
 
-def build_dataset(model_name, split="train", input_min_text_length=2, input_max_text_length=8):
+def build_dataset(model_name, split="train", data_dir="harmless-base", input_min_text_length=2, input_max_text_length=8):
     """
     Build dataset for training. This builds the dataset from `load_dataset`, one should
     customize this function to train the model on its own dataset.
@@ -26,7 +26,7 @@ def build_dataset(model_name, split="train", input_min_text_length=2, input_max_
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
     # load imdb with datasets
-    ds = load_dataset("Anthropic/hh-rlhf", data_dir="harmless-base", split=split, use_auth_token=True)
+    ds = load_dataset("Anthropic/hh-rlhf", data_dir=data_dir, split=split, use_auth_token=True)
     def tokenize(sample):
         sample["chosen_ids"] = tokenizer.encode(sample["rejected"])
         return sample
@@ -41,10 +41,11 @@ if __name__ == "__main__":
     rm_name = "/home/winnie/LMFlow/output_models/rm_head_1layer_finetune-gpt-neo_bs_10"
     k = 7
     device = 0 if torch.cuda.is_available() else "cpu"  # to avoid a `pipeline` bug
+    print("device", device)
 
     # We retrieve the dataloader by calling the `build_dataset` function.
     train_data = build_dataset(model_name, split="train")
-    test_data = build_dataset(model_name, split="test")
+    test_data = build_dataset(model_name, split="test", data_dir="helpful-base")
 
     # Load reward models and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -61,6 +62,7 @@ if __name__ == "__main__":
         # loaded_state = torch.load(f"{rm_name}/head_{i}")
         loaded_state = torch.load(f"{rm_name}/head_{i}", map_location="cuda:0")
         model.head.load_state_dict(loaded_state)
+        print(model)
         model.to(device)
         models.append(model)
   
@@ -71,7 +73,7 @@ if __name__ == "__main__":
     plt.figure(2)
     bins = np.linspace(0, 1, 100)
     d = {"train": train_data, "test": test_data}
-    d = {"test": test_data}
+    # d = {"test": test_data}
     for label, data in d.items():
         print(label)
         stds = []
@@ -104,7 +106,7 @@ if __name__ == "__main__":
             res_curr["length"] = len(response)
             res.append(res_curr)
         
-        with open(f'bootstrap_res_{label}.csv', 'w') as csvfile:
+        with open(f'bootstrap_head_res_{label}.csv', 'w') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=res[0].keys())
             writer.writeheader()
             writer.writerows(res)

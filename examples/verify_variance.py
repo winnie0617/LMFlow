@@ -85,8 +85,8 @@ if __name__ == "__main__":
         means = []
         lengths = []
         res = []
-        n = 2000
-        for input_num, chosen_input in enumerate(data["chosen"][:n]):
+        n = 1000
+        for input_num, chosen_input in enumerate(data["chosen"][:n] + data["rejected"][:n]):
             rewards = torch.zeros(k, 1)
             res_curr = {} # store res
             for i, sentiment_pipe in enumerate(sentiment_pipes):
