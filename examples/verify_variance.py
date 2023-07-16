@@ -46,7 +46,8 @@ if __name__ == "__main__":
 
     # We retrieve the dataloader by calling the `build_dataset` function.
     train_data = build_dataset(model_name, split="train")
-    test_data = build_dataset(model_name, split="test", data_dir="helpful-base")
+    # test_data = build_dataset(model_name, split="test", data_dir="helpful-base")
+    test_data = build_dataset(model_name, split="test")
 
     # Load reward models and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -79,6 +80,7 @@ if __name__ == "__main__":
     # Calculate reward std
     bins = np.linspace(0, 1, 100)
     d = {"train": train_data, "test": test_data}
+    d = {"test_harmless": test_data}
     for label, data in d.items():
         print(label)
         stds = []

@@ -79,7 +79,6 @@ if __name__ == "__main__":
     # plt.figure(2)
     bins = np.linspace(0, 1, 10)
     d = {"train": train_data, "test": test_data}
-    d = {"train": train_data}
     for label, data in d.items():
         print(label)
         stds = []

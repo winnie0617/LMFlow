@@ -81,7 +81,7 @@ if gpt:
 else:
     model_name = "/home/winnie/trl/examples/sentiment/scripts/my_models/finetune-with-lora-llama-merged"
 rm_name = "/home/winnie/LMFlow/output_models/rm_head_1layer_finetune-gpt-neo_bs_10"
-k = 7
+k = 3
 
 
 config = PPOConfig(

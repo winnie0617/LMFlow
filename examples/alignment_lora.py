@@ -77,7 +77,7 @@ if gpt:
     model_name = "/home/winnie/LMFlow/output_models/finetune-gpt-neo"
 else:
     model_name = "/home/winnie/trl/examples/sentiment/scripts/my_models/finetune-with-lora-llama-merged"
-rm_name = "/home/winnie/LMFlow/output_models/rm_finetune-gpt-neo_bs_3_merged"
+rm_name = "/home/winnie/LMFlow/output_models/rm_finetune-gpt-neo_bs_7_20"
 k = 3
 
 config = PPOConfig(
@@ -85,7 +85,7 @@ config = PPOConfig(
     learning_rate=1e-5,
     # init_kl_coef=0.05,
     log_with=script_args.log_with,
-    batch_size=32,
+    batch_size=1,
     mini_batch_size=1,
     gradient_accumulation_steps=1,
     optimize_cuda_cache=True,
@@ -201,7 +201,7 @@ if ppo_trainer.accelerator.num_processes == 1:
     device = 0 if torch.cuda.is_available() else "cpu"  # to avoid a `pipeline` bug
 sentiment_pipes = []
 for i in range(k):
-    sentiment_pipes.append(pipeline("sentiment-analysis", model=f"{rm_name}/rm_{i}", device=device))
+    sentiment_pipes.append(pipeline("sentiment-analysis", model=f"{rm_name}/rm_{i}", device=device, tokenizer=tokenizer))
 # sentiment_pipes = [pipeline("sentiment-analysis", model=f"{rm_name}/rm_{i}", device=device) for i in range(k)]
 
 # We then define the arguments to pass to the `generate` function. These arguments
@@ -218,6 +218,9 @@ generation_kwargs = {
 output_min_length = 10
 output_max_length = 128
 output_length_sampler = LengthSampler(output_min_length, output_max_length)
+
+rms_mean = [-0.63205298, 3.25818835, -1.06104101, 0.84300805, -1.34922852, -0.95705974, -0.70326481]
+rms_std = [1,1,1,1,1,1,1] #TODO: hard-coded
 
 
 for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
@@ -238,7 +241,7 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
     rewards = torch.zeros(k, config.batch_size)
     for i, sentiment_pipe in enumerate(sentiment_pipes):
         pipe_outputs = sentiment_pipe(texts, **sent_kwargs)
-        rewards[i,:] = torch.tensor([output[0]["score"] for output in pipe_outputs])
+        rewards[i,:] = (torch.tensor([output[0]["score"] for output in pipe_outputs]) - rms_mean[i]) / rms_std[i]
 
     print(rewards)
     rewards_mean = rewards.mean(axis=0)
@@ -264,7 +267,8 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
     model.pretrained_model.config.use_cache = False
 
     stats = ppo_trainer.step(query_tensors, response_tensors, penalized_reward)
-    ppo_trainer.log_stats(stats, batch, penalized_reward, rewards_std) # TODO: update logger
+    # ppo_trainer.log_stats(stats, batch, penalized_reward, rewards_std) # TODO: update logger
+    ppo_trainer.log_stats(stats, batch, penalized_reward)
 
 
-model.push_to_hub(f"{script_args.model_name}-ppo-sentiment")
+# model.push_to_hub(f"{script_args.model_name}-ppo-sentiment") 
