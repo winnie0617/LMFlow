@@ -405,6 +405,12 @@ class EvaluatorArguments:
     deepspeed : 
         Enable deepspeed and pass the path to deepspeed json config file (e.g. ds_config.json) or an already
         loaded json file as a dict
+        
+    temperature : float
+        An argument of model.generate in huggingface to control the diversity of generation.
+        
+    repetition_penalty : float
+        An argument of model.generate in huggingface to penalize repetitions.
     """
     local_rank: int = field(
         default=-1,
@@ -519,7 +525,22 @@ class EvaluatorArguments:
         },
     )
     use_accelerator_for_evaluator: bool = field(
-        default=False, metadata={"help": "Whether to use Huggingface Accelerator instead of Deepspeed"}
+        default=False, metadata={"help": "Whether to use Huggingface Accelerator instead of Deepspeed"},
+    )
+        
+    temperature: float = field(
+        default=0,
+        metadata={"help": "Temperature during inference."},
+    )
+    
+    repetition_penalty: float = field(
+        default=1,
+        metadata={"help": "Repetition_penalty during inference."},
+    )
+        
+    max_new_tokens: int = field(
+        default=100,
+        metadata={"help": "Maximum length during inference."},
     )
     
 @dataclass
@@ -538,7 +559,12 @@ class InferencerArguments:
         loaded json file as a dict
     mixed_precision : str, choice from ["bf16","fp16"].
         mixed precision mode, whether to use bf16 or fp16
-
+    
+    temperature : float
+        An argument of model.generate in huggingface to control the diversity of generation.
+        
+    repetition_penalty : float
+        An argument of model.generate in huggingface to penalize repetitions.
     """
     device: str = field(
         default="gpu",
@@ -550,8 +576,24 @@ class InferencerArguments:
     local_rank: int = field(
         default=-1,
         metadata={"help": "For distributed training: local_rank"
-        }
+        },
     )
+        
+    temperature: float = field(
+        default=0.0,
+        metadata={"help": "Temperature during inference."},
+    )
+    
+    repetition_penalty: float = field(
+        default=1,
+        metadata={"help": "Repetition_penalty during inference."},
+    )
+        
+    max_new_tokens: int = field(
+        default=100,
+        metadata={"help": "Maximum length during inference."},
+    )
+        
     random_seed: Optional[int] = field(
         default=1,
         metadata={
@@ -584,6 +626,7 @@ class InferencerArguments:
             "help": "whether turn on true random sampling during inference."
         },
     )
+        
 
 
 @dataclass
@@ -591,14 +634,32 @@ class RaftAlignerArguments(TrainingArguments):
     """
     Define a class RaftAlignerArguments to configure raft aligner.
     """
+    save_ranks: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "whether or not to store all the rank data"
+        },
+    )
+    output_rank_path: Optional[str] = field(
+        default="tmp/raft_aligner",
+        metadata={
+            "help": "path to store all the rank data"
+        },
+    )
+    raft_exp_dir: Optional[str] = field(
+        default="output_models/iter_raft_align",
+        metadata={
+            "help": "main directory to run raft experiments"
+        },
+    )
     output_reward_path: Optional[str] = field(
-        default="tmp/raft_aligner/",
+        default="tmp/raft_aligner",
         metadata={
             "help": "The path of output rewards."
         }
     )
     output_min_length: Optional[int] = field(
-        default=16,
+        default=64,
         metadata={
             "help": (
                 "minimum length of the output token sequence generated from"
@@ -607,7 +668,7 @@ class RaftAlignerArguments(TrainingArguments):
         },
     )
     output_max_length: Optional[int] = field(
-        default=48,
+        default=128,
         metadata={
             "help": (
                 "maximum length of the output token sequence generated from"
@@ -622,15 +683,14 @@ class RaftAlignerArguments(TrainingArguments):
         },
     )
     raft_batch_size: Optional[int] = field(
-        default=320,
+        default=1024,
         metadata={
             "help": (
-                "only select {raft_batch_size} samples each time to"
-                " generate rewards and be ranked for STF training."
+                "only select {raft_batch_size} samples each time for STF training."
             )
         },
     )
-    top_reward_percentage: Optional[int] = field(
+    top_reward_percentage: Optional[float] = field(
         default=0.2,
         metadata={
             "help": (
@@ -649,7 +709,56 @@ class RaftAlignerArguments(TrainingArguments):
             ),
         },
     )
-
+    collection_strategy: Optional[str] = field(
+        default="top",
+        metadata={
+            "help": (
+                "{collection_strategy} is either top or local"
+                " top means that we rank the samples globally regardless of the prompts"
+                " local means that we only rank the samples with the same prompt"
+            ),
+        },
+    )
+    mode: Optional[str] = field(
+        default="xxx",
+        metadata={
+            "help": (
+                "{collection_strategy} is either top or local"
+                " top means that we rank the samples globally regardless of the prompts"
+                " local means that we only rank the samples with the same prompt"
+            ),
+        },
+    )
+    raft_random_seed: Optional[int] = field(
+        default=1,
+        metadata={
+            "help": (
+                "{collection_strategy} is either top or local"
+                " top means that we rank the samples globally regardless of the prompts"
+                " local means that we only rank the samples with the same prompt"
+            ),
+        },
+    )
+    raft_infer_set: Optional[str] = field(
+        default="xxx",
+        metadata={
+            "help": (
+                "{collection_strategy} is either top or local"
+                " top means that we rank the samples globally regardless of the prompts"
+                " local means that we only rank the samples with the same prompt"
+            ),
+        },
+    )
+    raft_filtered_set: Optional[str] = field(
+        default="yyy",
+        metadata={
+            "help": (
+                "{collection_strategy} is either top or local"
+                " top means that we rank the samples globally regardless of the prompts"
+                " local means that we only rank the samples with the same prompt"
+            ),
+        },
+    )
 @dataclass
 class BenchmarkingArguments:
     dataset_name: Optional[str] = field(
