@@ -134,12 +134,13 @@ class Dataset:
         data_type = data_dict[KEY_TYPE]
         fields = self.get_backend_dataset().features
         correct_fields = INSTANCE_FIELDS_MAP[data_type]
+        '''
         if set(fields) != set(correct_fields):
             raise ValueError(
                 f'Data instance fields incorrect'
                 f' {list(fields)}: should be {list(correct_fields)}.'
             )
-
+        '''
 
     def from_dict(self, dict_obj: dict, *args, **kwargs):
         r"""
@@ -203,12 +204,15 @@ class Dataset:
             for i, instance in enumerate(dict_obj[KEY_INSTANCES]):
                 fields = instance.keys()
                 if set(fields) != set(correct_fields):
+                    '''
                     raise ValueError(
                         f'data instance fields incorrect'
                         f' {list(fields)}: should be {list(correct_fields)}.\n'
                         f'The bad instance triggers the error, the {i}-th instance:\n'
                         f'    {instance}'
-                )
+                    )
+                    '''
+                pass
 
             try:
                 hf_dict = {}

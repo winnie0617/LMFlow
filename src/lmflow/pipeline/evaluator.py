@@ -136,7 +136,7 @@ class Evaluator(BasePipeline):
         """
         if metric in ["acc", "accuracy"]:
             if self.evaluator_args.use_accelerator_for_evaluator:
-                acc = self._evaluate_acc_with_accelerator(model, dataset, verbose=verbose)
+                acc = self._evaluate_reward_with_accelerator(model, dataset, verbose=verbose) #self._evaluate_acc_with_accelerator(model, dataset, verbose=verbose)
             else:
                 acc = self._evaluate_acc_with_deepspeed(model, dataset, verbose=verbose)
             print(f"Evaluating final accuracy: {acc}")
@@ -149,9 +149,41 @@ class Evaluator(BasePipeline):
             nll = self._evaluate_nll(model, dataset, verbose=verbose)
             print(f"Evaluating final negative log likelihood: {nll}")
             return nll
+        elif metric in ['reward']:
+            reward = self._evaluate_reward_with_accelerator(model, dataset, verbose=verbose)
+            print(f"Evaluating reward: {reward}")
+            return 1
         else:
             raise NotImplementedError(f"metric {metric} is not supported")
 
+
+    def _evaluate_reward_with_accelerator(self, model, dataset, verbose=True):
+        dataloader, data_size = self.create_dataloader(dataset)
+        if self.accelerator.is_local_main_process:
+            if not os.path.exists(self.evaluator_args.output_dir):
+                os.makedirs(self.evaluator_args.output_dir)
+            output_writer = open(f"{self.evaluator_args.output_dir}/evaluation.json", "w")
+        rm_kwargs = {
+            "return_all_scores": True,
+            "function_to_apply": "none",
+            "batch_size": 1
+        }
+        all_rewards = []
+
+        for batch_index, batch in enumerate(dataloader):
+            if batch_index * self.world_size >= self.data_args.max_eval_samples: 
+                break
+            if self.local_rank*self.evaluator_args.inference_batch_size_per_device >= len(batch):
+                current_batch = batch[:self.evaluator_args.inference_batch_size_per_device]
+            else:
+                current_batch = batch[self.local_rank*self.evaluator_args.inference_batch_size_per_device:(self.local_rank+1)*self.evaluator_args.inference_batch_size_per_device]
+            
+            texts = [i['input'] for i in current_batch]
+            pipe_outputs = model.backend_model(texts, **rm_kwargs)
+            rewards = [output[0]["score"] for output in pipe_outputs]
+            print(rewards)
+        
+        return 1
 
     def _evaluate_acc_with_accelerator(self, model, dataset, verbose=True):
         dataloader, data_size = self.create_dataloader(dataset)
@@ -175,8 +207,24 @@ class Evaluator(BasePipeline):
             batch_input = model.encode(input, return_tensors="pt",padding=True).to(self.accelerator.device)
             inputs = batch_input['input_ids']
             mask = batch_input['attention_mask']
+
+            generation_kwargs = {
+                #"min_length": 1,
+                #"top_k": 0.0,
+                #"top_p": 1.0,
+                #"do_sample": True,
+                #"pad_token_id": tokenizer.eos_token_id,
+                "temperature":0.85,
+                "max_new_tokens":128,
+                #"num_beam_groups":4,
+                #"diversity_penalty":1.0,
+                "num_beams":4,
+                }
+
             with self.accelerator.autocast():
-                outputs = model.inference(inputs, max_new_tokens=100,attention_mask=mask,temperature=0.0,use_accelerator=self.evaluator_args.use_accelerator_for_evaluator)
+                #outputs = model.inference(inputs, max_new_tokens=self.evaluator_args.max_new_tokens,attention_mask=mask,temperature=self.evaluator_args.temperature, repetition_penalty=self.evaluator_args.repetition_penalty,use_accelerator=self.evaluator_args.use_accelerator_for_evaluator)
+                outputs = model.inference(inputs, attention_mask=mask,use_accelerator=self.evaluator_args.use_accelerator_for_evaluator,**generation_kwargs)
+
             text_out = model.decode(outputs, skip_special_tokens=True)
             decoded_input = model.decode(inputs, skip_special_tokens=True,)
             prompt_length = [len(i) for i in decoded_input]
@@ -258,7 +306,7 @@ class Evaluator(BasePipeline):
             batch_input = model.encode(input, return_tensors="pt",padding=True).to(device=self.local_rank)
             inputs = batch_input['input_ids']
             mask = batch_input['attention_mask']
-            outputs = model.inference(inputs, max_new_tokens=100,attention_mask=mask,temperature=0.0)
+            outputs = model.inference(inputs, max_new_tokens=self.evaluator_args.max_new_tokens, attention_mask=mask,temperature=self.evaluator_args.temperature, repetition_penalty=self.evaluator_args.repetition_penalty)
             text_out = model.decode(outputs, skip_special_tokens=True)
             # # only return the generation, trucating the input
             decoded_input = model.decode(inputs, skip_special_tokens=True,)

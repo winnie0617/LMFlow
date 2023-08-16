@@ -43,6 +43,7 @@ from transformers import (
     AutoConfig,
     AutoTokenizer,
     AutoModelForCausalLM,
+    pipeline
 )
 
 from lmflow.datasets.dataset import Dataset
@@ -129,7 +130,8 @@ class HFDecoderModel(DecoderModel, Tunable):
                 " script, save it, and load it from here, using"
                 " --tokenizer_name."
             )
-
+        
+        tokenizer.name_or_path=''
         self.tokenizer = tokenizer  
 
         torch_dtype = (
@@ -230,13 +232,32 @@ class HFDecoderModel(DecoderModel, Tunable):
             self.backend_model = model
             self.tune_strategy = tune_strategy
 
+
+        elif tune_strategy == "reward":
+            if use_accelerator:
+
+                #device = ppo_trainer.accelerator.device
+                print("I am in the correct place to init model.", device)
+                print(model_args.model_name_or_path)
+                sentiment_pipe = pipeline(
+                    "sentiment-analysis",
+                    model=model_args.model_name_or_path,
+                    #device=device,
+                    device_map="auto",
+                    #model_kwargs={"load_in_8bit": True},
+                    #tokenizer=self.tokenizer,
+                    #return_token_type_ids=False,
+                )
+                self.backend_model = sentiment_pipe
+
+
         elif tune_strategy == 'none':
             if use_accelerator:
                 peft_model_id = model_args.lora_model_path
                 self.backend_model = AutoModelForCausalLM.from_pretrained(
                         model_args.model_name_or_path,
                         config=config,
-                        device_map="auto",
+                        device_map="balanced",#"auto",
                         offload_folder="offload",
                         offload_state_dict=True,
                         torch_dtype=torch_dtype,
