@@ -38,7 +38,10 @@ class RewardArguments:
         },
     )
     reward_model_or_path: Optional[str] = field(
-        default="lvwerra/distilbert-imdb", #"weqweasdas/hh_rlhf_rm",
+        default=None,
+        # default="lvwerra/distilbert-imdb", #"weqweasdas/hh_rlhf_rm",
+        # default="/home/winnie/output_models/openllama_3b_rm_2sft_full_train_5e-6_1epoch_4x8bs_raw_dataset",
+
         metadata={
             "help": (
                 "reward model name (huggingface) or its path"
@@ -160,7 +163,7 @@ def main():
     # )
     model_args.lora_model_path = model_args.model_name_or_path
     model_args.model_name_or_path = "/home/winnie/output_models/sft_llama_7b_2e-5_1epoch"
-    model = AutoModel.get_model(model_args)
+    model = AutoModel.get_model(model_args, tune_strategy="none", ds_config=pipeline_args.deepspeed)
     # tokenizer = AutoTokenizer.from_pretrained(peft_model_path, use_fast=False)
     # tokenizer.add_special_tokens(
     #     {
@@ -173,16 +176,19 @@ def main():
     # tokenizer.padding_side = "left"
 
     # Initializes reward function
-    reward_function = get_reward_function(reward_args, pipeline_args)
-
-    reward_model_args = ModelArguments(arch_type="text_regression")
-    reward_model = AutoModel.get_model(reward_model_args)
-    reward_model.register_inference_function(reward_function)
+    if reward_args.reward_model_or_path is not None:
+        reward_function = get_reward_function(reward_args, pipeline_args)
+        reward_model_args = ModelArguments(arch_type="text_regression")
+        reward_model = AutoModel.get_model(reward_model_args)
+        reward_model.register_inference_function(reward_function)
+    else:
+        reward_model = None
 
     # Aligns model with rewards
     aligned_model = aligner.align(
         model=model,
         dataset=dataset,
+        # reward_model=reward_model,
         reward_model=reward_model,
         # tokenizer=tokenizer
     )

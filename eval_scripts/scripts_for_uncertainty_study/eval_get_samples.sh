@@ -24,7 +24,7 @@ deepspeed ${deepspeed_args} \
     --learning_rate 2e-5 \
     --lr_scheduler_type "constant" \
     --bf16 \
-    --deepspeed /home/winnie/LMFlow/configs/ds_config_zero2.json \
+    --deepspeed /home/winnie/LMFlow/configs/ds_config_eval.json \
     --dataset_path /home/winnie/data/clean_hh_rlhf_uncerrtainty_study/rlhf_eval_prompt \
     --output_reward_path ${project_dir}/tmp/raft_aligner/eval_reward.txt \
     --output_dir ${output_dir} --overwrite_output_dir \
