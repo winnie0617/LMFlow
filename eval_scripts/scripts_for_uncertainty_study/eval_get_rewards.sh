@@ -5,8 +5,7 @@ deepspeed_args="--master_port=11112"      # Default argument
 
 
 exp_id=test_infer_reward
-# project_dir=$(cd "$(dirname $0)"/..; pwd)
-project_dir = "/home/winnie"
+project_dir=$(cd "$(dirname $0)"/..; pwd)
 output_dir=${project_dir}/output_models/${exp_id}
 log_dir=${project_dir}/log/${exp_id}
 
@@ -16,6 +15,7 @@ export PYTHONPATH=.
 deepspeed ${deepspeed_args} \
     scripts_for_uncertainty_study/infer_get_rewards1.py \
     --model_name_or_path gpt2\
+    --lora_model_path $1 \
     --raft_exp_dir $3 \
     --reward_model_or_path $4 \
     --mode "eval_get_rewards" \
@@ -25,7 +25,7 @@ deepspeed ${deepspeed_args} \
     --raft_filtered_set $2 \
     --lr_scheduler_type "constant" \
     --bf16 \
-    --deepspeed ${project_dir}/LMFlow/configs/ds_config_zero2.json \
+    --deepspeed /home/winnie/LMFlow/configs/ds_config_zero2.json \
     --dataset_path $1 \
     --output_reward_path ${project_dir}/tmp/raft_aligner/reward.txt \
     --output_dir ${output_dir} --overwrite_output_dir \

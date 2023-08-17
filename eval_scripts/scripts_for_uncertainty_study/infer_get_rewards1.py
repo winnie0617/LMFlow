@@ -137,6 +137,7 @@ def main():
         data_args=data_args,
         pipeline_args=pipeline_args,
     )
+    print(data_args)
     dataset = Dataset(data_args)
     model = AutoModel.get_model(model_args)
 
