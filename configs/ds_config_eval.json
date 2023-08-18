@@ -3,7 +3,7 @@
         "enabled": false
     },
     "bf16": {
-        "enabled": false
+        "enabled": "auto"
     },
     "steps_per_print": 2000,
     "train_micro_batch_size_per_gpu": 1,

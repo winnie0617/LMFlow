@@ -14,7 +14,7 @@ mkdir -p ${output_dir} ${log_dir}
 export PYTHONPATH=.
 deepspeed ${deepspeed_args} \
     scripts_for_uncertainty_study/infer_get_rewards1.py \
-    --model_name_or_path gpt2\
+    --model_name_or_path /home/winnie/output_models/openllama_3b_rm_2sft_full_train_5e-6_1epoch_4x8bs_raw_dataset\
     --lora_model_path $1 \
     --raft_exp_dir $3 \
     --reward_model_or_path $4 \

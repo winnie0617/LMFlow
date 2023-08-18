@@ -1,7 +1,7 @@
 #!/bin/bash
 
-count=27
-base_dir="/home/winnie/ppo_llama_klcoef0.01"
+count=17
+base_dir="/home/winnie/ppo_llama_klcoef0.05"
 
 for (( i=1; i<=$count; i++ )); do
   model_dir="${base_dir}/batch_${i}"

@@ -102,6 +102,7 @@ class HFEncoderDecoderModel(EncoderDecoderModel, Tunable):
         # Distributed training: The .from_pretrained methods guarantee that
         # only one local process can concurrently download model & vocab.
 
+
         self.device = device
 
         if tune_strategy == 'normal':
@@ -158,6 +159,7 @@ class HFEncoderDecoderModel(EncoderDecoderModel, Tunable):
             self.tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
             self.backend_model_full = self.backend_model
             if peft_model_id is not None:
+                logger.info(f"Loading peft model {peft_model_id}")
                 self.backend_model = PeftModel.from_pretrained(
                     self.backend_model, peft_model_id
                 )

@@ -316,6 +316,7 @@ class HFDecoderModel(DecoderModel, Tunable):
 
                 self.backend_model_full = self.backend_model
                 if peft_model_id is not None:
+                    logger.info(f"Loading peft model {peft_model_id}")
                     self.backend_model = PeftModel.from_pretrained(
                         self.backend_model, peft_model_id
                     )
